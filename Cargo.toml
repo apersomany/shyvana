@@ -1,0 +1,16 @@
+[package]
+name = "shyvana"
+version = "0.1.0"
+edition = "2021"
+
+
+[dependencies.x25519]
+package = "x25519-dalek"
+version = "2.0"
+features = ["static_secrets"]
+
+[dependencies.blake2]
+version = "0.10"
+
+[dependencies.chacha20poly1305]
+version = "0.10"
