@@ -9,7 +9,17 @@ macro_rules! packet {
         }
 
         impl $name {
-            pub fn wrap<'a>(buffer: &'a mut [u8]) -> Result<&'a mut Self> {
+            pub fn wrap_ref<'a>(buffer: &'a [u8]) -> Result<&'a Self> {
+                if buffer.len() < size_of::<Self>() {
+                    Err(Error::BufferTooSmall)
+                } else {
+                    unsafe {
+                        Ok(&*buffer.as_ptr().cast())
+                    }
+                }
+            }
+
+            pub fn wrap_mut<'a>(buffer: &'a mut [u8]) -> Result<&'a mut Self> {
                 if buffer.len() < size_of::<Self>() {
                     Err(Error::BufferTooSmall)
                 } else {

@@ -1,3 +1,5 @@
+#![feature(generic_arg_infer)]
+
 pub mod async_tunnel;
 pub mod config;
 pub mod crypto;

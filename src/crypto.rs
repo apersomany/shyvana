@@ -46,18 +46,13 @@ pub(super) use HMAC;
 
 macro_rules! HKDF {
     ($key:expr, $($input:expr),+) => {{
-        fn inner_impl<const N: usize>() -> [[u8; 32]; N] {
-            let mut result = [[0u8; 32]; N];
-            let t_0 = HMAC!($key, $($input),+);
-            for i in 0..N {
-                result[i] = HMAC!(t_0, [i as u8 + 1])
-            }
-            for i in 1..N {
-                result[i] = HMAC!(t_0, result[i - 1], [i as u8 + 1]);
-            }
-            result
+        let mut result = [[0u8; 32]; _];
+        let t_0 = HMAC!($key, $($input),+);
+        result[0] = HMAC!(t_0, [0x01]);
+        for i in 1..result.len() {
+            result[i] = HMAC!(t_0, result[i - 1], [i as u8 + 1]);
         }
-        inner_impl()
+        result
     }};
 }
 
@@ -71,16 +66,34 @@ macro_rules! TAI64N {
         result
     }};
     () => {
-        fn inner_impl() -> Result<[u8; 12], std::time::SystemTimeError> {
-            Ok(TAI64N!(std::time::SystemTime::UNIX_EPOCH.elapsed()?))
-        }
+        TAI64N!(std::time::SystemTime::UNIX_EPOCH.elapsed()?)
     };
 }
 
 pub(super) use TAI64N;
 
+#[test]
+fn aead() {}
+
 macro_rules! AEAD {
-    ($key:expr, $counter:expr, $plain_text:expr, $auth_text:expr) => {};
+    ($key:expr, $counter:expr, $plain_text:expr, $auth_text:expr) => {{
+        use chacha20poly1305::{
+            aead::{Aead, Payload},
+            ChaCha20Poly1305, KeyInit,
+        };
+        let _ = $counter;
+        ChaCha20Poly1305::new(&$key.into())
+            .encrypt(
+                &[0; 12].into(),
+                Payload {
+                    msg: $plain_text.as_ref(),
+                    aad: $auth_text.as_ref(),
+                },
+            )
+            .unwrap()
+            .try_into()
+            .unwrap()
+    }};
 }
 
 pub(super) use AEAD;
