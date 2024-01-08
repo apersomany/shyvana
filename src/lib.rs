@@ -1,9 +1,7 @@
-#![feature(generic_arg_infer)]
-
 pub mod async_tunnel;
-pub mod config;
+pub mod cipher;
 pub mod crypto;
 pub mod error;
-pub mod noise;
+pub mod handshake;
 pub mod packet;
 pub mod tunnel;

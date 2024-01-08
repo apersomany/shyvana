@@ -1,99 +1,75 @@
-macro_rules! HASH {
-    ($($input:expr),+) => {{
-        use blake2::{
-            digest::{consts::U32, Digest},
-            Blake2s
-        };
-        let mut hash = Blake2s::<U32>::new();
-        $(
-            hash.update($input);
-        )+
-        Into::<[u8; 32]>::into(hash.finalize())
-    }};
+use blake2::{
+    digest::{
+        consts::{U16, U32},
+        Digest, Mac,
+    },
+    Blake2s, Blake2sMac,
+};
+use chacha20poly1305::{AeadInPlace, ChaCha20Poly1305, KeyInit};
+use hmac::SimpleHmac;
+
+pub fn hash(one: impl AsRef<[u8]>, two: impl AsRef<[u8]>) -> [u8; 0x20] {
+    let mut digest: Blake2s<U32> = Digest::new();
+    digest.update(one);
+    digest.update(two);
+    digest.finalize().into()
 }
 
-pub(super) use HASH;
-
-macro_rules! MAC {
-    ($key:expr, $($input:expr),+) => {{
-        use blake2::{
-            digest::{consts::U16, Mac},
-            Blake2sMac
-        };
-        let key = AsRef::<[u8]>::as_ref(&$key).into();
-        let mut mac = Blake2sMac::<U16>::new();
-        $(
-            mac.update($input.as_ref());
-        )+
-        Into::<[u8; 16]>::into(mac.finalize().into_bytes())
-    }};
+pub fn mac(key: impl AsRef<[u8]>, txt: impl AsRef<[u8]>) -> [u8; 0x10] {
+    let mut digest: Blake2sMac<U16> = Mac::new_from_slice(key.as_ref()).unwrap();
+    digest.update(txt.as_ref());
+    digest.finalize().into_bytes().into()
 }
 
-pub(super) use MAC;
-
-macro_rules! HMAC {
-    ($key:expr, $($input:expr),+) => {{
-        let key = AsRef::<[u8]>::as_ref(&$key);
-        let mut opad = [0x5C; 0x40];
-        opad.iter_mut().zip(key).for_each(|(p, k)| *p ^= *k);
-        let mut ipad = [0x36; 0x40];
-        ipad.iter_mut().zip(key).for_each(|(p, k)| *p ^= *k);
-        HASH!(opad, HASH!(ipad, $($input),+))
-    }};
-}
-
-pub(super) use HMAC;
-
-macro_rules! HKDF {
-    ($key:expr, $($input:expr),+) => {{
-        let mut result = [[0u8; 32]; _];
-        let t_0 = HMAC!($key, $($input),+);
-        result[0] = HMAC!(t_0, [0x01]);
-        for i in 1..result.len() {
-            result[i] = HMAC!(t_0, result[i - 1], [i as u8 + 1]);
+pub fn kdf<const N: usize>(key: impl AsRef<[u8]>, txt: impl AsRef<[u8]>) -> [[u8; 0x20]; N] {
+    let mut output = [[0x00; 0x20]; N];
+    let mut digest: SimpleHmac<Blake2s<U32>> = Mac::new_from_slice(key.as_ref()).unwrap();
+    digest.update(txt.as_ref());
+    let key = digest.finalize().into_bytes();
+    for i in 0..N {
+        let mut digest: SimpleHmac<Blake2s<U32>> = Mac::new_from_slice(key.as_ref()).unwrap();
+        if i > 0 {
+            digest.update(&output[i - 1]);
         }
-        result
-    }};
+        digest.update(&[i as u8 + 1]);
+        output[i] = digest.finalize().into_bytes().into()
+    }
+    output
 }
 
-pub(super) use HKDF;
-
-macro_rules! TAI64N {
-    ($duration:expr) => {{
-        let mut result = [0u8; 12];
-        result[0x00..0x08].copy_from_slice(&$duration.as_secs().to_be_bytes());
-        result[0x00..0x0C].copy_from_slice(&$duration.subsec_nanos().to_be_bytes());
-        result
-    }};
-    () => {
-        TAI64N!(std::time::SystemTime::UNIX_EPOCH.elapsed()?)
-    };
-}
-
-pub(super) use TAI64N;
-
-#[test]
-fn aead() {}
-
-macro_rules! AEAD {
-    ($key:expr, $counter:expr, $plain_text:expr, $auth_text:expr) => {{
-        use chacha20poly1305::{
-            aead::{Aead, Payload},
-            ChaCha20Poly1305, KeyInit,
-        };
-        let _ = $counter;
-        ChaCha20Poly1305::new(&$key.into())
-            .encrypt(
-                &[0; 12].into(),
-                Payload {
-                    msg: $plain_text.as_ref(),
-                    aad: $auth_text.as_ref(),
-                },
-            )
+pub fn seal(
+    key: impl AsRef<[u8]>,
+    cnt: u64,
+    aad: impl AsRef<[u8]>,
+    mut txt: impl AsMut<[u8]>,
+    mut tag: impl AsMut<[u8]>,
+) -> Result<(), chacha20poly1305::Error> {
+    let mut nonce = [0x00; 0x0c];
+    nonce[0x04..0x0c].copy_from_slice(&cnt.to_le_bytes());
+    tag.as_mut().copy_from_slice(
+        ChaCha20Poly1305::new_from_slice(key.as_ref())
             .unwrap()
-            .try_into()
-            .unwrap()
-    }};
+            .encrypt_in_place_detached(&nonce.into(), aad.as_ref(), txt.as_mut())?
+            .as_ref(),
+    );
+    Ok(())
 }
 
-pub(super) use AEAD;
+pub fn open(
+    key: impl AsRef<[u8]>,
+    cnt: u64,
+    aad: impl AsRef<[u8]>,
+    mut txt: impl AsMut<[u8]>,
+    tag: impl AsRef<[u8]>,
+) -> Result<(), chacha20poly1305::Error> {
+    let mut nonce = [0x00; 0x0c];
+    nonce[0x04..0x0c].copy_from_slice(&cnt.to_le_bytes());
+    ChaCha20Poly1305::new_from_slice(key.as_ref())
+        .unwrap()
+        .decrypt_in_place_detached(
+            &nonce.into(),
+            aad.as_ref(),
+            txt.as_mut(),
+            tag.as_ref().into(),
+        )
+}

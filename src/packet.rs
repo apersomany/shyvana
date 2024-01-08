@@ -1,74 +1,94 @@
 use crate::error::{Error, Result};
-use std::mem::size_of;
+use core::{
+    mem::size_of,
+    ops::{Deref, DerefMut},
+    slice,
+};
 
-macro_rules! packet {
-    ($name:ident { $($field_name:ident: $field_size:literal),+ }) => {
-        #[repr(packed)]
-        pub struct $name {
-            $(pub $field_name: [u8; $field_size]),+
-        }
+macro_rules! define {
+    (
+        $(
+            $name:ident {
+                $(
+                    $field_name:ident: $field_size:literal
+                )+
+            }
+        )+
+    ) => {
+        $(
+            #[repr(packed)]
+            pub struct $name {
+                pub m_t: u8,
+                pub r_0: [u8; 0x03],
+                $(
+                    pub $field_name: [u8; $field_size],
+                )+
+            }
 
-        impl $name {
-            pub fn wrap_ref<'a>(buffer: &'a [u8]) -> Result<&'a Self> {
-                if buffer.len() < size_of::<Self>() {
-                    Err(Error::BufferTooSmall)
-                } else {
-                    unsafe {
-                        Ok(&*buffer.as_ptr().cast())
+            impl $name {
+                pub fn wrap_mut(buffer: &mut [u8]) -> Result<&mut Self> {
+                    if buffer.len() < size_of::<Self>() {
+                        Err(Error::BufferLengthTooShort {
+                            expected: size_of::<Self>(),
+                            got: buffer.len()
+                        })
+                    } else {
+                        unsafe {
+                            Ok(&mut*(buffer as *mut _ as *mut Self))
+                        }
+                    }
+                }
+
+                pub fn wrap_ref(buffer: &[u8]) -> Result<&Self> {
+                    if buffer.len() < size_of::<Self>() {
+                        Err(Error::BufferLengthTooShort {
+                            expected: size_of::<Self>(),
+                            got: buffer.len()
+                        })
+                    } else {
+                        unsafe {
+                            Ok(&*(buffer as *const _ as *const Self))
+                        }
                     }
                 }
             }
 
-            pub fn wrap_mut<'a>(buffer: &'a mut [u8]) -> Result<&'a mut Self> {
-                if buffer.len() < size_of::<Self>() {
-                    Err(Error::BufferTooSmall)
-                } else {
-                    unsafe {
-                        Ok(&mut *buffer.as_mut_ptr().cast())
-                    }
+            impl Deref for $name {
+                type Target = [u8];
+
+                fn deref(&self) -> &Self::Target {
+                    unsafe { slice::from_raw_parts(self as *const _ as *const u8, size_of::<Self>()) }
                 }
             }
-        }
+
+            impl DerefMut for $name {
+                fn deref_mut(&mut self) -> &mut Self::Target {
+                    unsafe { slice::from_raw_parts_mut(self as *mut _ as *mut u8, size_of::<Self>()) }
+                }
+            }
+        )+
     };
 }
 
-packet! {
-    HandshakeInitiation {
-        message_type: 0x04,
-        sender_index: 0x04,
-        unencrypted_ephemeral: 0x20,
-        encrypted_static: 0x30,
-        encrypted_timestamp: 0x1c,
-        mac1: 0x10,
-        mac2: 0x10
+define! {
+    HandshakeInit {
+        s_i: 0x04
+        u_e: 0x20
+        e_s: 0x30
+        e_t: 0x1c
+        m_1: 0x10
+        m_2: 0x10
     }
-}
-
-packet! {
-    HandshakeResponse {
-        message_type: 0x04,
-        sender_index: 0x04,
-        receiver_index: 0x04,
-        unencrypted_ephemeral: 0x20,
-        encrypted_nothing: 0x10,
-        mac1: 0x10,
-        mac2: 0x10
+    HandshakeResp {
+        s_i: 0x04
+        r_i: 0x04
+        u_e: 0x20
+        e_n: 0x10
+        m_1: 0x10
+        m_2: 0x10
     }
-}
-
-packet! {
-    CookieReply {
-        message_type: 0x04,
-        receiver_index: 0x08,
-        nonce: 0x18,
-        encrypted_cookie: 0x20
-    }
-}
-
-packet! {
-    TransportDataHeader {
-        message_type: 0x04,
-        receiver_index: 0x04,
-        counter: 0x08
+    TransportData {
+        r_i: 0x04
+        cnt: 0x08
     }
 }

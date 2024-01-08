@@ -1,18 +1,24 @@
-use std::fmt::Debug;
+use std::fmt::{Debug, Display, Formatter};
 
 #[derive(Debug)]
 pub enum Error {
-    BufferTooSmall,
-    InvalidMessageType,
-    InvalidMessageData,
-    BoxStdError(Box<dyn std::error::Error>),
-    BoxDbgError(Box<dyn Debug>),
+    BufferLengthTooShort { expected: usize, got: usize },
+    AeadError,
+    BufferLengthInvalid,
 }
 
-impl<T: std::error::Error + 'static> From<T> for Error {
-    fn from(value: T) -> Self {
-        Self::BoxStdError(Box::new(value))
+impl From<chacha20poly1305::Error> for Error {
+    fn from(_: chacha20poly1305::Error) -> Self {
+        Self::AeadError
     }
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        Debug::fmt(&self, f)
+    }
+}
+
+impl std::error::Error for Error {}
+
+pub type Result<T> = core::result::Result<T, Error>;
